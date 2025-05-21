@@ -317,7 +317,7 @@
         }
 
         // Only update progress if there is velocity
-        if (currentVelocity > EPSILON+10) { 
+        if (currentVelocity > EPSILON) { 
           currentProgress += currentVelocity// * delta;
           if (currentProgress > 1) {
             currentProgress %= 1;
