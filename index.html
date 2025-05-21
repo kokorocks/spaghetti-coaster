@@ -250,7 +250,7 @@
         if (coasterState === 'stopped') {
           coasterState = 'accelerating';
           startButton.style.display = 'none';
-         // messageDisplay.textContent = 'Starting up...';
+          messageDisplay.textContent = 'Starting up...';
           currentVelocity = 0; // Ensure it starts from a dead stop
         }
       });
@@ -286,7 +286,7 @@
             if (currentVelocity >= maxCoasterVelocity) {
               currentVelocity = maxCoasterVelocity;
               coasterState = 'riding';
-             // messageDisplay.textContent = 'Enjoy the ride!';
+              messageDisplay.textContent = 'Enjoy the ride!';
             }
             break;
 
