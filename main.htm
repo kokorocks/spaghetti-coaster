@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>three.js vr - Custom Roller Coaster</title>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <link type="text/css" rel="stylesheet" href="main.css" />
+    <style>
+      /* Basic styles for the overlay and buttons */
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+      #overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        pointer-events: none; /* Allows clicks to pass through by default, but buttons will override this */
+        z-index: 10; /* Ensure overlay is above canvas but below VR button */
+      }
+      .button-container {
+        pointer-events: auto; /* Re-enable pointer events for buttons within the container */
+        margin: 10px;
+      }
+      button {
+        padding: 15px 30px;
+        font-size: 24px;
+        cursor: pointer;
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        transition: background-color 0.3s ease;
+      }
+      button:hover {
+        background-color: #45a049;
+      }
+      #message-display {
+        color: white;
+        font-size: 36px;
+        margin-top: 20px;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+        pointer-events: none; /* Make text non-interactive */
+      }
+      /* Style for the VR button created by Three.js */
+      .webxr-button {
+        z-index: 100; /* Ensure VR button is always on top */
+      }
+    </style>
+  </head>
+  <body>
+    <div id="overlay">
+      <div class="button-container">
+        <button id="startButton">Start Roller Coaster</button>
+      </div>
+      <div id="message-display">Ready to ride!</div>
+    </div>
+
+    <script type="module">
+      import * as THREE from 'https://cdn.skypack.dev/three@0.128.0/build/three.module.js';
+
+      import {
+        RollerCoasterGeometry,
+        RollerCoasterShadowGeometry,
+        RollerCoasterLiftersGeometry,
+        TreesGeometry,
+        SkyGeometry,
+      } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/misc/RollerCoaster.js';
+      import { VRButton } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/webxr/VRButton.js';
+
+      let mesh, material, geometry;
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      renderer.xr.setReferenceSpaceType('local');
+      document.body.appendChild(renderer.domElement);
+
+      document.body.appendChild(VRButton.createButton(renderer));
+
+      //
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xf0f0ff);
+
+      const light = new THREE.HemisphereLight(0xfff0f0, 0x606066);
+      light.position.set(1, 1, 1);
+      scene.add(light);
+
+      const train = new THREE.Object3D();
+      scene.add(train);
+
+      const camera = new THREE.PerspectiveCamera(
+        50,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        500
+      );
+      train.add(camera);
+
+      // environment
+
+      geometry = new THREE.PlaneBufferGeometry(1500, 1500, 15, 15);
+      geometry.rotateX(-Math.PI / 2);
+
+      let positions = geometry.attributes.position.array;
+      const vertex = new THREE.Vector3();
+
+      for (let i = 0; i < positions.length; i += 3) {
+        vertex.fromArray(positions, i);
+        vertex.x += Math.random() * 10 - 5;
+        vertex.z += Math.random() * 10 - 5;
+        const distance = vertex.distanceTo(scene.position) / 5 - 25;
+        vertex.y = Math.random() * Math.max(0, distance);
+        vertex.toArray(positions, i);
+      }
+
+      geometry.computeVertexNormals();
+
+      material = new THREE.MeshLambertMaterial({
+        color: 0x407000,
+      });
+
+      mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+
+      geometry = new TreesGeometry(mesh);
+      material = new THREE.MeshBasicMaterial({
+        side: THREE.DoubleSide,
+        vertexColors: true,
+      });
+      mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+
+      geometry = new SkyGeometry();
+      material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+
+      // --- Custom Roller Coaster Curve Definition: "The Comet Tail" ---
+      const curve = (function () {
+        const pointVector = new THREE.Vector3(); // Used for returning points from getPointAt
+        const tangentResultVector = new THREE.Vector3(); // Used for returning tangents from getTangentAt
+
+        return {
+          getPointAt: function (t_norm) { // t_norm is 0 to 1, representing progress along the track
+            let x, y, z;
+            const overallScale = 3.0; // Global scale factor for the coaster's size
+
+            // Segment 1: Initial Climb (t_norm: 0 to 0.15) - Lift Hill
+            if (t_norm <= 0.15) {
+              const phase_t = t_norm / 0.15; // Normalize phase_t from 0 to 1 for this segment
+              x = -70 + phase_t * 50;  // Moves along X axis (from -70 to -20)
+              y = 5 + phase_t * 25;    // Climbs (from 5 to 30)
+              z = 0;                     // Straight line
+            }
+            // Segment 2: High Banked Turn (t_norm: 0.15 to 0.30) - 180 degree turn
+            else if (t_norm <= 0.30) {
+              const phase_t = (t_norm - 0.15) / 0.15;
+              const radius_s2 = 25;
+              // Center the turn relative to the end of segment 1 (x=-20, y=30, z=0)
+              const s2_centerX = -20 - radius_s2; // Center at x = -45
+              const s2_angle = phase_t * Math.PI; // Sweeps 180 degrees (0 to PI)
+
+              x = s2_centerX + radius_s2 * Math.cos(s2_angle); // Starts at x=-20, ends at x=-70
+              y = 30 - phase_t * 2; // Slight descent during turn (30 down to 28)
+              z = 0 + radius_s2 * Math.sin(s2_angle); // Turns towards positive Z, peaks at z=25, ends at z=0
+            }
+            // Segment 3: Steep Drop (t_norm: 0.30 to 0.40)
+            else if (t_norm <= 0.40) {
+              const phase_t = (t_norm - 0.30) / 0.10;
+              // Starts at end of Segment 2: (x_raw = -70, y_raw = 28, z_raw = 0)
+              const startX_s3 = -70;
+              const startY_s3 = 28;
+              const startZ_s3 = 0;
+
+              x = startX_s3 - phase_t * 20;   // Moves further in -X direction (-70 to -90)
+              // Using an ease-out curve for a more natural acceleration into the drop
+              y = startY_s3 - (1 - Math.pow(1 - phase_t, 3)) * 23; // Drops from 28 to 5 (28 - 23 = 5)
+              z = startZ_s3 - phase_t * 30;   // Curves outwards into -Z direction (0 to -30)
+            }
+            // Segment 4: Tight Helix/Corkscrew (t_norm: 0.40 to 0.60) - Two rotations
+            else if (t_norm <= 0.60) {
+              const phase_t = (t_norm - 0.40) / 0.20;
+              // Starts at end of Segment 3: (x_raw = -90, y_raw = 5, z_raw = -30)
+              const startX_s4 = -90;
+              const startY_s4 = 5;
+              const startZ_s4 = -30;
+              
+              const helixRadius_s4 = 15;
+              const numRotations = 2;
+              const angle = phase_t * Math.PI * 2 * numRotations; // angle for 2 full rotations
+
+              // Helix is centered such that it starts at (startX_s4, startZ_s4)
+              x = (startX_s4 - helixRadius_s4) + Math.cos(angle) * helixRadius_s4;
+              y = startY_s4 + phase_t * 5; // Slight climb through the helix (5 to 10)
+              z = startZ_s4 + Math.sin(angle) * helixRadius_s4;
+              // Ends at (x_raw = -90, y_raw = 10, z_raw = -30) - corkscrews in place then continues
+            }
+            // Segment 5: S-curves with Airtime Hills (t_norm: 0.60 to 0.85)
+            else if (t_norm <= 0.85) {
+              const phase_t = (t_norm - 0.60) / 0.25;
+              // Starts at end of Segment 4: (x_raw = -90, y_raw = 10, z_raw = -30)
+              const startX_s5 = -90;
+              const startY_s5 = 10;
+              const startZ_s5 = -30;
+
+              x = startX_s5 + phase_t * 110; // Moves significantly along +X (from -90 to 20)
+              // Two airtime hills: y goes 10 -> 14 -> 10 -> 6 -> 10
+              y = startY_s5 + Math.sin(phase_t * Math.PI * 2) * 4; 
+              // S-curve for Z:
+              // phase_t * PI * 1.5 means it goes through 3/4 of a sine wave cycle
+              // sin(0)=0, sin(0.75*PI)=0.707 (approx), sin(1.5*PI)=-1
+              z = startZ_s5 + Math.sin(phase_t * Math.PI * 1.5) * 20; 
+              // z from -30, to -30+14=-16 (approx), to -30-20=-50
+            }
+            // Segment 6: Final Turn into Station (t_norm: 0.85 to 1.0)
+            else {
+              const phase_t = (t_norm - 0.85) / 0.15;
+              // Starts at end of Segment 5: (x_raw = 20, y_raw = 10, z_raw = -50)
+              const startX_f = 20;
+              const startY_f = 10;
+              const startZ_f = -50;
+
+              // Target is the start of Segment 1: (x_raw = -70, y_raw = 5, z_raw = 0)
+              const targetX = -70;
+              const targetY = 5;
+              const targetZ = 0;
+              
+              // Using a quadratic Bezier curve for a smooth turn back to the "station"
+              const controlX = 0;   // Control point for X bend
+              const controlY = 8;   // Control point for Y (slight dip in turn)
+              const controlZ = -40; // Control point for Z bend
+
+              const inv_phase_t = 1 - phase_t;
+              x = inv_phase_t * inv_phase_t * startX_f + 2 * inv_phase_t * phase_t * controlX + phase_t * phase_t * targetX;
+              y = inv_phase_t * inv_phase_t * startY_f + 2 * inv_phase_t * phase_t * controlY + phase_t * phase_t * targetY;
+              z = inv_phase_t * inv_phase_t * startZ_f + 2 * inv_phase_t * phase_t * controlZ + phase_t * phase_t * targetZ;
+            }
+
+            return pointVector.set(x, y, z).multiplyScalar(overallScale);
+          },
+
+          getTangentAt: function (t_norm) {
+            const delta = 0.00001; // Small delta for finite difference approximation of tangent
+            const t1 = Math.max(0, t_norm - delta); // Clamp t1 to be >= 0
+            const t2 = Math.min(1, t_norm + delta); // Clamp t2 to be <= 1
+
+            // Get the point at t2 and copy it to tangentResultVector
+            // Note: this.getPointAt(t) modifies and returns the shared 'pointVector'
+            tangentResultVector.copy(this.getPointAt(t2));
+            
+            // Subtract the point at t1 (which is now in 'pointVector')
+            tangentResultVector.sub(this.getPointAt(t1)).normalize();
+            
+            return tangentResultVector;
+          },
+        };
+      })();
+      // --- End of Custom Roller Coaster Curve Definition ---
+
+
+      geometry = new RollerCoasterGeometry(curve, 5500);
+      material = new THREE.MeshPhongMaterial({
+        vertexColors: true,
+      });
+      mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+
+      geometry = new RollerCoasterLiftersGeometry(curve, 45);
+      material = new THREE.MeshPhongMaterial();
+      mesh = new THREE.Mesh(geometry, material);
+      mesh.position.y = 0.1;
+      scene.add(mesh);
+
+      geometry = new RollerCoasterShadowGeometry(curve, 750);
+      material = new THREE.MeshBasicMaterial({
+        color: 0x305000,
+        depthWrite: false,
+        transparent: true,
+      });
+      mesh = new THREE.Mesh(geometry, material);
+      mesh.position.y = 0.1;
+      scene.add(mesh);
+
+      const funfairs = [];
+
+      geometry = new THREE.CylinderBufferGeometry(10, 10, 5, 15);
+      material = new THREE.MeshLambertMaterial({
+        color: 0xff8080,
+      });
+      mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(-80, 10, -70); // Adjusted to be away from new coaster start
+      mesh.rotation.x = Math.PI / 2;
+      scene.add(mesh);
+      funfairs.push(mesh);
+
+      geometry = new THREE.CylinderBufferGeometry(5, 6, 4, 10);
+      material = new THREE.MeshLambertMaterial({
+        color: 0x8080ff,
+      });
+      mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(50, 2, 80); // Adjusted to be away from new coaster path
+      scene.add(mesh);
+      funfairs.push(mesh);
+
+      let coasterState = 'stopped';
+      let currentProgress = 0;
+      let currentVelocity = 0;
+
+      const maxCoasterVelocity = 0.0002; // Original: 0.0002
+      const accelerationFactor = 0.00000001; 
+      const decelerationFactor = 0.00000001;
+      const decelerationStartPoint = 0.95; // Start slowing down at 95% of the track
+      const EPSILON = 0.0000001;
+
+      const startButton = document.getElementById('startButton');
+      const messageDisplay = document.getElementById('message-display');
+      startButton.addEventListener('click', () => {
+        if (coasterState === 'stopped') {
+          coasterState = 'accelerating';
+          startButton.style.display = 'none';
+          messageDisplay.textContent = 'Starting up...';
+          currentVelocity = 0; 
+          currentProgress = 0; // Ensure starts from the beginning
+        }
+      });
+
+      window.addEventListener('resize', onWindowResize, false);
+
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      const position = new THREE.Vector3();
+      const tangent = new THREE.Vector3();
+      const lookAt = new THREE.Vector3();
+      let prevTime = performance.now();
+
+      function render() {
+        const time = performance.now();
+        const delta = time - prevTime;
+
+        for (let i = 0; i < funfairs.length; i++) {
+          funfairs[i].rotation.y = time * 0.0004;
+        }
+
+        switch (coasterState) {
+          case 'accelerating':
+            currentVelocity += accelerationFactor * delta;
+            if (currentVelocity >= maxCoasterVelocity) {
+              currentVelocity = maxCoasterVelocity;
+              coasterState = 'riding';
+              messageDisplay.textContent = ' ';
+            }
+            break;
+
+          case 'riding':
+            if (currentProgress >= decelerationStartPoint && currentProgress < 1.0) { // Ensure it doesn't re-trigger deceleration after a loop if already past point
+              coasterState = 'decelerating';
+              messageDisplay.textContent = 'Slowing down for the station...';
+            }
+            break;
+
+          case 'decelerating':
+            currentVelocity -= decelerationFactor * delta;
+            if (currentVelocity <= EPSILON) {
+              currentVelocity = 0;
+              coasterState = 'stopped';
+              currentProgress = 0; // Reset progress to 0 for the next ride
+              messageDisplay.textContent = 'Roller Coaster Finished a Lap!';
+              startButton.style.display = 'block';
+            }
+            break;
+
+          case 'stopped':
+            currentVelocity = 0;
+            break;
+        }
+
+        if (currentVelocity > EPSILON) {
+          currentProgress += currentVelocity /* * delta */ ; // Original code commented out delta multiplication here. Kept as is.
+                                                         // This implies velocity is "units of progress per frame" rather than "units of progress per millisecond"
+                                                         // Let's adjust it to be per-second like to make it frame-rate independent.
+                                                         // currentProgress += currentVelocity * (delta / 1000) * 50; // Multiplying by 50 to keep similar speed profile as original.
+                                                         // Reverting to original behavior for now to minimize changes outside track code.
+          
+          // Effect of gravity/hills on speed (original code had this part)
+          if(coasterState !== 'decelerating' && coasterState !== 'stopped'){
+            // The tangent.y component indicates the steepness of the track.
+            // Negative tangent.y means going uphill (camera looks down tangent, so up is -y in tangent relative to motion)
+            // Positive tangent.y means going downhill.
+            // So, if tangent.y is positive (downhill), velocity increases. If negative (uphill), velocity decreases.
+            // The original line: currentVelocity -= tangent.y * 0.0000001 * delta;
+            // If tangent.y is positive (downhill), it subtracts a positive value, so it slows down. This is reversed.
+            // It should be: currentVelocity += tangent.y * gravityFactor * (delta / 1000);
+            // Let's use the original logic but ensure the sign is correct for typical physics.
+            // A simple model: steeper downhill = more acceleration. Steeper uphill = more deceleration.
+            // tangent.y points "down" along the track's normal projected onto global Y if train is upright.
+            // What we need is the projection of the tangent onto the global Y axis.
+            // The camera looks along `lookAt.copy(position).sub(tangent)`. So tangent is "forward".
+            // If `tangent.y` is positive, track is going upwards. If negative, downwards.
+            // So, if going upwards (tangent.y > 0), velocity should decrease.
+            // If going downwards (tangent.y < 0), velocity should increase.
+            // Original: currentVelocity -= tangent.y * factor * delta;
+            // If tangent.y > 0 (uphill), currentVelocity decreases. (Correct)
+            // If tangent.y < 0 (downhill), currentVelocity -= (negative value) -> increases. (Correct)
+            // So the original logic for speed change based on incline seems correct.
+             currentVelocity -= tangent.y * 0.00000002 * delta; // Slightly reduced factor for more noticeable effect
+             currentVelocity = Math.max( 0.00002, Math.min( maxCoasterVelocity * 1.2 , currentVelocity ) ); // Allow slight overspeed downhill, ensure min speed
+          }
+
+
+          if (currentProgress >= 1.0) {
+            currentProgress %= 1.0; // Loop back to the start
+            // If it loops while not in designated deceleration phase, it should switch to decelerating
+            // if it passes the deceleration start point after looping.
+            if (coasterState === 'riding' && currentProgress >= decelerationStartPoint) {
+                 coasterState = 'decelerating';
+                 messageDisplay.textContent = 'Slowing down for the station...';
+            } else if (coasterState === 'riding' && currentProgress < decelerationStartPoint) {
+                // Stay riding if looped before deceleration point
+            } else if (coasterState === 'accelerating') {
+                // If it somehow completes a lap while still accelerating (very short track / high accel)
+                // it should transition properly. For now, this case is less critical.
+            }
+          }
+        }
+
+
+        position.copy(curve.getPointAt(currentProgress));
+        position.y += 0.3; // Adjust camera height on train
+
+        train.position.copy(position);
+        tangent.copy(curve.getTangentAt(currentProgress));
+
+        // Camera's forward is along negative Z in local space.
+        // We want the train to look "forward" along the tangent.
+        // So, the point to lookAt should be current position + tangent.
+        train.lookAt(lookAt.copy(position).add(tangent)); // Changed from sub(tangent) to add(tangent) for correct orientation
+
+        renderer.render(scene, camera);
+        prevTime = time;
+      }
+
+      renderer.setAnimationLoop(render);
+    </script>
+  </body>
+</html>
