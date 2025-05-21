@@ -1,0 +1,351 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>three.js vr - roller coaster</title>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <link type="text/css" rel="stylesheet" href="main.css" />
+    <style>
+      /* Basic styles for the overlay and buttons */
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+      #overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        pointer-events: none; /* Allows clicks to pass through by default, but buttons will override this */
+        z-index: 10; /* Ensure overlay is above canvas but below VR button */
+      }
+      .button-container {
+        pointer-events: auto; /* Re-enable pointer events for buttons within the container */
+        margin: 10px;
+      }
+      button {
+        padding: 15px 30px;
+        font-size: 24px;
+        cursor: pointer;
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        transition: background-color 0.3s ease;
+      }
+      button:hover {
+        background-color: #45a049;
+      }
+      #message-display {
+        color: white;
+        font-size: 36px;
+        margin-top: 20px;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+        pointer-events: none; /* Make text non-interactive */
+      }
+      /* Style for the VR button created by Three.js */
+      .webxr-button {
+        z-index: 100; /* Ensure VR button is always on top */
+      }
+    </style>
+  </head>
+  <body>
+    <div id="overlay">
+      <div class="button-container">
+        <button id="startButton">Start Roller Coaster</button>
+      </div>
+      <div id="message-display">Ready to ride!</div>
+    </div>
+
+    <script type="module">
+      import * as THREE from 'https://cdn.skypack.dev/three@0.128.0/build/three.module.js';
+
+      import {
+        RollerCoasterGeometry,
+        RollerCoasterShadowGeometry,
+        RollerCoasterLiftersGeometry,
+        TreesGeometry,
+        SkyGeometry,
+      } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/misc/RollerCoaster.js';
+      import { VRButton } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/webxr/VRButton.js';
+
+      let mesh, material, geometry;
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      renderer.xr.setReferenceSpaceType('local');
+      document.body.appendChild(renderer.domElement);
+
+      document.body.appendChild(VRButton.createButton(renderer));
+
+      //
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xf0f0ff);
+
+      const light = new THREE.HemisphereLight(0xfff0f0, 0x606066);
+      light.position.set(1, 1, 1);
+      scene.add(light);
+
+      const train = new THREE.Object3D();
+      scene.add(train);
+
+      const camera = new THREE.PerspectiveCamera(
+        50,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        500
+      );
+      train.add(camera);
+
+      // environment
+
+      geometry = new THREE.PlaneBufferGeometry(1500, 1500, 15, 15);
+      geometry.rotateX(-Math.PI / 2);
+
+      let positions = geometry.attributes.position.array;
+
+      const vertex = new THREE.Vector3();
+
+      for (let i = 0; i < positions.length; i += 3) {
+        vertex.fromArray(positions, i);
+
+        vertex.x += Math.random() * 10 - 5;
+        vertex.z += Math.random() * 10 - 5;
+
+        const distance = vertex.distanceTo(scene.position) / 5 - 25;
+        vertex.y = Math.random() * Math.max(0, distance);
+
+        vertex.toArray(positions, i);
+      }
+
+      geometry.computeVertexNormals();
+
+      material = new THREE.MeshLambertMaterial({
+        color: 0x407000,
+      });
+
+      mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+
+      geometry = new TreesGeometry(mesh);
+      material = new THREE.MeshBasicMaterial({
+        side: THREE.DoubleSide,
+        vertexColors: true,
+      });
+      mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+
+      geometry = new SkyGeometry();
+      material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+
+      // --- Original Roller Coaster Curve Definition ---
+      const PI2 = Math.PI * 2;
+
+      const curve = (function () {
+        const vector = new THREE.Vector3();
+        const vector2 = new THREE.Vector3();
+
+        return {
+          getPointAt: function (t) {
+            t = t * PI2;
+
+            const x = Math.sin(t * 3) * Math.cos(t * 4) * 32;
+            const y = Math.sin(t * 18) * 2 + Math.cos(t * 17) * 8.2 + 12;
+            const z = Math.sin(t) * Math.sin(t * 14) * 35;
+
+            return vector.set(x, y, z).multiplyScalar(3);
+          },
+
+          getTangentAt: function (t) {
+            const delta = 0.0001;
+            const t1 = Math.max(0, t - delta);
+            const t2 = Math.min(1, t + delta);
+
+            return vector2
+              .copy(this.getPointAt(t2))
+              .sub(this.getPointAt(t1))
+              .normalize();
+          },
+        };
+      })();
+
+      geometry = new RollerCoasterGeometry(curve, 5500);
+      material = new THREE.MeshPhongMaterial({
+        vertexColors: true,
+      });
+      mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+
+      geometry = new RollerCoasterLiftersGeometry(curve, 45);
+      material = new THREE.MeshPhongMaterial();
+      mesh = new THREE.Mesh(geometry, material);
+      mesh.position.y = 0.1;
+      scene.add(mesh);
+
+      geometry = new RollerCoasterShadowGeometry(curve, 750);
+      material = new THREE.MeshBasicMaterial({
+        color: 0x305000,
+        depthWrite: false,
+        transparent: true,
+      });
+      mesh = new THREE.Mesh(geometry, material);
+      mesh.position.y = 0.1;
+      scene.add(mesh);
+
+      const funfairs = [];
+
+      geometry = new THREE.CylinderBufferGeometry(10, 10, 5, 15);
+      material = new THREE.MeshLambertMaterial({
+        color: 0xff8080,
+      });
+      mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(-80, 10, -70);
+      mesh.rotation.x = Math.PI / 2;
+      scene.add(mesh);
+
+      funfairs.push(mesh);
+
+      geometry = new THREE.CylinderBufferGeometry(5, 6, 4, 10);
+      material = new THREE.MeshLambertMaterial({
+        color: 0x8080ff,
+      });
+      mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(50, 2, 30);
+      scene.add(mesh);
+
+      funfairs.push(mesh);
+
+      let coasterState = 'stopped'; 
+      let currentProgress = 0; 
+      let currentVelocity = 0; 
+
+      // Tuned these values for a more natural feel and guaranteed stop.
+      const maxCoasterVelocity = 0.0002;
+      // Acceleration and deceleration factors. Smaller values mean more gradual.
+      const accelerationFactor = 0.00000001; // Slower ramp up
+      const decelerationFactor = 0.00000001; // Slower ramp down, adjusted for reliable stop
+
+      // The point on the track (0 to 1) where deceleration should begin.
+      const decelerationStartPoint = 0.95;
+
+      // A small threshold to consider velocity as zero to avoid floating point issues
+      const EPSILON = 0.0000001; 
+      const startButton = document.getElementById('startButton');
+      const messageDisplay = document.getElementById('message-display');
+      startButton.addEventListener('click', () => {
+        if (coasterState === 'stopped') {
+          coasterState = 'accelerating';
+          startButton.style.display = 'none';
+         // messageDisplay.textContent = 'Starting up...';
+          currentVelocity = 0; // Ensure it starts from a dead stop
+        }
+      });
+
+      window.addEventListener('resize', onWindowResize, false);
+
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      //
+
+      const position = new THREE.Vector3();
+      const tangent = new THREE.Vector3();
+      const lookAt = new THREE.Vector3();
+      let prevTime = performance.now();
+
+      function render() {
+        const time = performance.now();
+        const delta = time - prevTime; // Time in milliseconds since last frame
+
+        for (let i = 0; i < funfairs.length; i++) {
+          funfairs[i].rotation.y = time * 0.0004;
+        }
+
+
+        switch (coasterState) {
+          case 'accelerating':
+            currentVelocity += accelerationFactor * delta;
+            if (currentVelocity >= maxCoasterVelocity) {
+              currentVelocity = maxCoasterVelocity;
+              coasterState = 'riding';
+             // messageDisplay.textContent = 'Enjoy the ride!';
+            }
+            break;
+
+          case 'riding':
+
+            if (currentProgress >= decelerationStartPoint) {
+              coasterState = 'decelerating';
+              messageDisplay.textContent = 'Slowing down for the station...';
+            }
+            break;
+
+          case 'decelerating':
+            currentVelocity -= decelerationFactor * delta;
+
+            // --- IMPORTANT FIX: Snap to zero velocity for a complete stop ---
+            if (currentVelocity <= EPSILON) { 
+              currentVelocity = 0;
+              coasterState = 'stopped';
+              currentProgress = 0; 
+              messageDisplay.textContent = 'Roller Coaster Finished a Lap!';
+              startButton.style.display = 'block';
+            }
+            break;
+
+          case 'stopped':
+            currentVelocity = 0; // Ensure it stays at 0
+            break;
+        }
+
+        // Only update progress if there is velocity
+        if (currentVelocity > EPSILON+10) { 
+          currentProgress += currentVelocity// * delta;
+          if (currentProgress > 1) {
+            currentProgress %= 1;
+            if (coasterState === 'riding') {
+                coasterState = 'decelerating';
+                messageDisplay.textContent = 'Slowing down for the station...';
+            }
+          }
+        }
+
+        // Always update coaster position to ensure it's visible at its current progress
+        position.copy(curve.getPointAt(currentProgress));
+        position.y += 0.3; // Adjust height for the camera/train
+
+        train.position.copy(position);
+
+        tangent.copy(curve.getTangentAt(currentProgress));
+
+        train.lookAt(lookAt.copy(position).sub(tangent));
+        if(coasterState!=='decelerating'){              	currentVelocity -= tangent.y * 0.0000001 * delta;
+      	currentVelocity = Math.max( 0.00004, Math.min( 0.0002, currentVelocity ) );}
+
+        renderer.render(scene, camera);
+
+        prevTime = time;
+      }
+
+      renderer.setAnimationLoop(render);
+    </script>
+  </body>
+</html>
