@@ -1,18 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <title>three.js vr - roller coaster</title>
+    <title>Custom Three.js VR Roller Coaster</title>
     <meta charset="utf-8" />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, user-scalable=no"
     />
-    <link type="text/css" rel="stylesheet" href="main.css" />
     <style>
-      /* Basic styles for the overlay and buttons */
       body {
         margin: 0;
         overflow: hidden;
+        font-family: Arial, sans-serif;
       }
       #overlay {
         position: absolute;
@@ -24,11 +23,11 @@
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        pointer-events: none; /* Allows clicks to pass through by default, but buttons will override this */
-        z-index: 10; /* Ensure overlay is above canvas but below VR button */
+        pointer-events: none;
+        z-index: 10;
       }
       .button-container {
-        pointer-events: auto; /* Re-enable pointer events for buttons within the container */
+        pointer-events: auto;
         margin: 10px;
       }
       button {
@@ -49,11 +48,10 @@
         font-size: 36px;
         margin-top: 20px;
         text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
-        pointer-events: none; /* Make text non-interactive */
+        pointer-events: none;
       }
-      /* Style for the VR button created by Three.js */
       .webxr-button {
-        z-index: 100; /* Ensure VR button is always on top */
+        z-index: 100;
       }
     </style>
   </head>
@@ -67,7 +65,6 @@
 
     <script type="module">
       import * as THREE from 'https://cdn.skypack.dev/three@0.128.0/build/three.module.js';
-
       import {
         RollerCoasterGeometry,
         RollerCoasterShadowGeometry,
@@ -77,23 +74,19 @@
       } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/misc/RollerCoaster.js';
       import { VRButton } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/webxr/VRButton.js';
 
-      let mesh, material, geometry;
-
+      // Scene setup
       const renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
       renderer.xr.setReferenceSpaceType('local');
       document.body.appendChild(renderer.domElement);
-
       document.body.appendChild(VRButton.createButton(renderer));
-
-      //
 
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0xf0f0ff);
 
-      const light = new THREE.HemisphereLight(0xfff0f0, 0x606066);
+      const light = new THREE.HemisphereLight(0xfff0f0, 0x606066, 1);
       light.position.set(1, 1, 1);
       scene.add(light);
 
@@ -103,269 +96,198 @@
       const camera = new THREE.PerspectiveCamera(
         50,
         window.innerWidth / window.innerHeight,
-        0.01,
+        0.1,
         500
       );
       train.add(camera);
 
-      // environment
+      // Custom track definition
+      const trackPoints = [
+        // Starting station - level
+        new THREE.Vector3(0, 10, 0),
+        
+        // Initial lift hill
+        new THREE.Vector3(20, 30, 0),
+        new THREE.Vector3(40, 50, 0),
+        
+        // First major drop
+        new THREE.Vector3(60, 45, -20),
+        new THREE.Vector3(80, 25, -40),
+        new THREE.Vector3(100, 15, -20),
+        
+        // Helix section
+        new THREE.Vector3(120, 20, 0),
+        new THREE.Vector3(140, 25, 20),
+        new THREE.Vector3(120, 30, 40),
+        new THREE.Vector3(100, 35, 20),
+        
+        // Second hill
+        new THREE.Vector3(80, 40, 0),
+        new THREE.Vector3(60, 35, -20),
+        
+        // Final turn back to station
+        new THREE.Vector3(40, 20, -40),
+        new THREE.Vector3(20, 15, -20),
+        new THREE.Vector3(0, 10, 0), // Back to start
+      ];
 
-      geometry = new THREE.PlaneBufferGeometry(1500, 1500, 15, 15);
-      geometry.rotateX(-Math.PI / 2);
+      // Create a smooth curve from the track points
+      const curve = new THREE.CatmullRomCurve3(trackPoints, true, 'centripetal');
+      
+      // Helper function to get point with custom curve implementation
+      const customCurve = {
+        getPointAt: function(t) {
+          return curve.getPointAt(t);
+        },
+        getTangentAt: function(t) {
+          return curve.getTangentAt(t);
+        }
+      };
 
-      let positions = geometry.attributes.position.array;
+      // Environment setup
+      const groundGeometry = new THREE.PlaneGeometry(500, 500, 15, 15);
+      groundGeometry.rotateX(-Math.PI / 2);
 
+      const positions = groundGeometry.attributes.position.array;
       const vertex = new THREE.Vector3();
 
       for (let i = 0; i < positions.length; i += 3) {
         vertex.fromArray(positions, i);
-
         vertex.x += Math.random() * 10 - 5;
         vertex.z += Math.random() * 10 - 5;
-
-        const distance = vertex.distanceTo(scene.position) / 5 - 25;
+        const distance = (vertex.distanceTo(scene.position) / 5) - 25;
         vertex.y = Math.random() * Math.max(0, distance);
-
         vertex.toArray(positions, i);
       }
 
-      geometry.computeVertexNormals();
+      groundGeometry.computeVertexNormals();
 
-      material = new THREE.MeshLambertMaterial({
-        color: 0x107000,
+      const groundMaterial = new THREE.MeshLambertMaterial({
+        color: 0x407000
       });
 
-      mesh = new THREE.Mesh(geometry, material);
-      scene.add(mesh);
+      const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+      scene.add(ground);
 
-      geometry = new TreesGeometry(mesh);
-      material = new THREE.MeshBasicMaterial({
+      // Trees
+      const treesGeometry = new TreesGeometry(ground);
+      const treesMaterial = new THREE.MeshBasicMaterial({
         side: THREE.DoubleSide,
-        vertexColors: true,
+        vertexColors: true
       });
-      mesh = new THREE.Mesh(geometry, material);
-      scene.add(mesh);
+      const trees = new THREE.Mesh(treesGeometry, treesMaterial);
+      scene.add(trees);
 
-      geometry = new SkyGeometry();
-      material = new THREE.MeshBasicMaterial({ color: 0xffffff });
-      mesh = new THREE.Mesh(geometry, material);
-      scene.add(mesh);
+      // Sky
+      const skyGeometry = new SkyGeometry();
+      const skyMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+      scene.add(sky);
 
-      // --- Original Roller Coaster Curve Definition ---
-      const PI2 = Math.PI * 2;
-
-const curvePoints = [
-  new THREE.Vector3(0, 10, 0),
-  new THREE.Vector3(10, 12, -10),
-  new THREE.Vector3(20, 8, -20),
-  new THREE.Vector3(30, 15, -10),
-  new THREE.Vector3(40, 20, 0),
-  new THREE.Vector3(50, 18, 10),
-  new THREE.Vector3(60, 12, 20),
-  new THREE.Vector3(70, 5, 10),
-  new THREE.Vector3(80, 0, 0),
-  new THREE.Vector3(90, -5, -10),
-  new THREE.Vector3(100, -10, 0),
-  new THREE.Vector3(110, -5, 10),
-  new THREE.Vector3(120, 0, 0),
-];
-const baseCurve = new THREE.CatmullRomCurve3(curvePoints, false, 'centripetal');
-
-// Wrap with getPointAt() and getTangentAt()
-const curve = {
-  getPointAt: function (t) {
-    return baseCurve.getPointAt(t);
-  },
-  getTangentAt: function (t) {
-    return baseCurve.getTangentAt(t);
-  }
-};
-
-
-      geometry = new RollerCoasterGeometry(curve, 5500);
-      material = new THREE.MeshPhongMaterial({
-        vertexColors: true,
+      // Roller coaster track
+      const trackGeometry = new RollerCoasterGeometry(customCurve, 1500);
+      const trackMaterial = new THREE.MeshPhongMaterial({
+        vertexColors: true
       });
-      mesh = new THREE.Mesh(geometry, material);
-      scene.add(mesh);
+      const track = new THREE.Mesh(trackGeometry, trackMaterial);
+      scene.add(track);
 
-      geometry = new RollerCoasterLiftersGeometry(curve, 100);
-      material = new THREE.MeshPhongMaterial();
-      mesh = new THREE.Mesh(geometry, material);
-      mesh.position.y = 0.1;
-      scene.add(mesh);
+      // Support structures
+      const liftersGeometry = new RollerCoasterLiftersGeometry(customCurve, 10);
+      const liftersMaterial = new THREE.MeshPhongMaterial();
+      const lifters = new THREE.Mesh(liftersGeometry, liftersMaterial);
+      lifters.position.y = 0.1;
+      scene.add(lifters);
 
-      geometry = new RollerCoasterShadowGeometry(curve, 750);
-      material = new THREE.MeshBasicMaterial({
+      // Track shadows
+      const shadowGeometry = new RollerCoasterShadowGeometry(customCurve, 500);
+      const shadowMaterial = new THREE.MeshBasicMaterial({
         color: 0x305000,
         depthWrite: false,
-        transparent: true,
+        transparent: true
       });
-      mesh = new THREE.Mesh(geometry, material);
-      mesh.position.y = 0.1;
-      scene.add(mesh);
+      const shadow = new THREE.Mesh(shadowGeometry, shadowMaterial);
+      shadow.position.y = 0.1;
+      scene.add(shadow);
 
-      const funfairs = [];
+      // State variables
+      let currentVelocity = 0;
+      let currentProgress = 0;
+      let coasterState = 'stopped';
+      let prevTime = performance.now();
+      
+      // Physics constants
+      const GRAVITY = 11.81; // m/s²
+      const TRACK_SCALE = 1; // Scale factor for converting world units to meters
+      const FRICTION = 0.000000000001; // Rolling friction coefficient
+      const MAX_VELOCITY = 2000000;
+      const MIN_VELOCITY = 0.00008;
 
-      geometry = new THREE.CylinderBufferGeometry(10, 10, 5, 15);
-      material = new THREE.MeshLambertMaterial({
-        color: 0xff8080,
-      });
-      mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(-80, 10, -70);
-      mesh.rotation.x = Math.PI / 2;
-      scene.add(mesh);
-
-      funfairs.push(mesh);
-
-      geometry = new THREE.CylinderBufferGeometry(5, 6, 4, 10);
-      material = new THREE.MeshLambertMaterial({
-        color: 0x8080ff,
-      });
-      mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(50, 2, 30);
-      scene.add(mesh);
-
-      funfairs.push(mesh);
-
-      // --- New State Variables for controlled motion ---
-      let coasterState = 'stopped'; // 'stopped', 'pre-ride-delay', 'accelerating', 'riding', 'decelerating'
-      let currentProgress = 0; // The progress along the curve (0 to 1)
-      let currentVelocity = 0; // The actual velocity of the coaster
-
-      // Tuned these values for a more natural feel and guaranteed stop.
-      const maxCoasterVelocity = 0.0002;
-      // Acceleration and deceleration factors. Smaller values mean more gradual.
-      const accelerationFactor = 0.00000001; // Slower ramp up
-      const decelerationFactor = 0.00000001; // Slower ramp down, adjusted for reliable stop
-
-      // The point on the track (0 to 1) where deceleration should begin.
-      const decelerationStartPoint = 0.99999999999;
-
-      // A small threshold to consider velocity as zero to avoid floating point issues
-      const EPSILON = 0.0000001; // Epsilon for floating point comparisons
-
-      // --- Delay Variables ---
-      const initialDelayDuration = 5000; // 5 seconds in milliseconds
-      let delayTimer = 0;
-
-      // --- UI Elements ---
+      // UI Elements
       const startButton = document.getElementById('startButton');
       const messageDisplay = document.getElementById('message-display');
 
-      // --- Event Listener ---
       startButton.addEventListener('click', () => {
         if (coasterState === 'stopped') {
-          coasterState = 'pre-ride-delay'; // New state for initial delay
+          coasterState = 'running';
           startButton.style.display = 'none';
-          messageDisplay.textContent = 'Ride starting in 5...';
-          currentVelocity = 0; // Ensure it starts from a dead stop
-          delayTimer = initialDelayDuration; // Initialize delay timer
+          messageDisplay.textContent = 'Hold on tight!';
+          currentVelocity = MIN_VELOCITY;
         }
       });
 
-      window.addEventListener('resize', onWindowResize, false);
-
-      function onWindowResize() {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-
-        renderer.setSize(window.innerWidth, window.innerHeight);
-      }
-
-      //
-
-      const position = new THREE.Vector3();
-      const tangent = new THREE.Vector3();
-      const lookAt = new THREE.Vector3();
-      let prevTime = performance.now();
-
+      // Animation loop
       function render() {
         const time = performance.now();
-        const delta = time - prevTime; // Time in milliseconds since last frame
+        const delta = time - prevTime;
 
-        for (let i = 0; i < funfairs.length; i++) {
-          funfairs[i].rotation.y = time * 0.0004;
-        }
-
-        // --- Roller Coaster Movement Logic ---
-        switch (coasterState) {
-          case 'pre-ride-delay':
-            delayTimer -= delta;
-            // Update countdown message
-            const secondsLeft = Math.ceil(delayTimer / 1000);
-            if (secondsLeft > 0) {
-              messageDisplay.textContent = `Ride starting in ${secondsLeft}...`;
-            } else {
-              messageDisplay.textContent = 'GO!'; // Final message before starting
-            }
-
-            if (delayTimer <= 0) {
-              coasterState = 'accelerating';
-              messageDisplay.textContent = 'Starting up...'; // This will be quickly overridden
-            }
-            break;
-
-          case 'accelerating':
-            currentVelocity += accelerationFactor * delta;
-            if (currentVelocity >= maxCoasterVelocity) {
-              currentVelocity = maxCoasterVelocity;
-              coasterState = 'riding';
-              messageDisplay.textContent = ' ';
-            }
-            break;
-
-          case 'riding':
-            if (currentProgress >= decelerationStartPoint) {
-              coasterState = 'decelerating';
-              messageDisplay.textContent = 'Stopping abruptly at the station!';
-            }
-            break;
-
-          case 'decelerating':
-            // Instead of gradual deceleration, snap to stop immediately.
-            currentVelocity = 0;
-            currentProgress = 0; // Snap to exact start after stopping
+        if (coasterState === 'running') {
+          // Update position
+          currentProgress += currentVelocity;
+          if (currentProgress >= 1) {
+            currentProgress = 0;
             coasterState = 'stopped';
-            messageDisplay.textContent = 'Roller Coaster Finished a Lap!';
-            startButton.style.display = 'block'; // Show start button again
-            break;
-
-          case 'stopped':
-            currentVelocity = 0; // Ensure it stays at 0
-            break;
-        }
-
-        if (coasterState === 'riding' || coasterState === 'accelerating') {
-          currentProgress += currentVelocity //* delta;
-          let i=0
-          if (currentProgress > 1) {
-            currentProgress %= 1;
-            if (coasterState === 'riding') {
-
-                coasterState = 'decelerating'; 
-                messageDisplay.textContent = 'Stopping abruptly at the station!';
-            }
+            startButton.style.display = 'block';
+            messageDisplay.textContent = 'Ready for another ride?';
           }
+
+          // Get current track position and tangent
+          const position = customCurve.getPointAt(currentProgress);
+          const tangent = customCurve.getTangentAt(currentProgress);
+
+          // Update train position
+          position.y += 0.3;
+          train.position.copy(position);
+
+          // Calculate physics
+          if (coasterState === 'running') {
+            // Apply gravity effect based on track slope
+            currentVelocity -= tangent.y * 0.0000002 * delta;
+            
+            // Apply friction
+            currentVelocity *= (1 - FRICTION);
+            
+            // Clamp velocity
+            currentVelocity = Math.max(MIN_VELOCITY, Math.min(MAX_VELOCITY, currentVelocity));
+          }
+
+          // Update train orientation
+          const lookAt = new THREE.Vector3();
+          train.lookAt(lookAt.copy(position).sub(tangent));
         }
-
-        // Always update coaster position to ensure it's visible at its current progress
-        position.copy(curve.getPointAt(currentProgress));
-        position.y += 0.3; // Adjust height for the camera/train
-
-        train.position.copy(position);
-
-        tangent.copy(curve.getTangentAt(currentProgress));
-        
-                if(coasterState!=='decelerating'){              	currentVelocity -= tangent.y * 0.0000001 * delta;
-      	currentVelocity = Math.max( 0.00004, Math.min( 0.0002, currentVelocity ) );}
-        train.lookAt(lookAt.copy(position).sub(tangent));
 
         renderer.render(scene, camera);
-
         prevTime = time;
       }
 
+      // Window resize handler
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      window.addEventListener('resize', onWindowResize);
       renderer.setAnimationLoop(render);
     </script>
   </body>
