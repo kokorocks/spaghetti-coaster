@@ -1,61 +1,199 @@
-<!DOCTYPE html>
+<!--link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/emoji-mart@latest/dist/emoji-mart.css" />
+<script src="https://cdn.jsdelivr.net/npm/emoji-mart@latest/dist/emoji-mart.min.js"></script>
+
+
+<input type="text" id="emojiInput" placeholder="Type something..." />
+<div id="emojiPickerContainer"></div>
+
+<script>
+const input = document.getElementById('emojiInput');
+const picker = new EmojiMart.Picker({
+  onEmojiSelect: emoji => {
+    input.value += emoji.native;
+  },
+  theme: 'light',
+  locale: 'en',
+});
+document.getElementById('emojiPickerContainer').appendChild(picker);
+</script--><!DOCTYPE html>
 <html lang="en">
-  <head>
-    <title>VR Roller Coaster</title>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>
-      body { margin: 0; overflow: hidden; font-family: sans-serif; }
-      #overlay {
-        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        display: flex; flex-direction: column; justify-content: center; align-items: center;
-        pointer-events: none; z-index: 10;
-      }
-      .button-container { pointer-events: auto; margin: 10px; }
-      button {
-        padding: 15px 30px; font-size: 24px; cursor: pointer;
-        background-color: #4caf50; color: white; border: none; border-radius: 8px;
-      }
-      button:hover { background-color: #45a049; }
-      #message-display {
-        color: white; font-size: 36px; margin-top: 20px;
-        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
-        pointer-events: none;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="overlay">
-      <div class="button-container">
-        <button id="startButton">Start Train</button>
+<head>
+  <title>VR Roller Coaster</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body{overflow: hidden;}
+    .nums { width: 18%; border: none; }
+    .container { border: black solid 5px; overflow: auto;}
+    #edit { position: fixed; right: 0%; z-index: 5;}
+    #startButton { position: fixed; left: 0% }
+    #display {
+      position: fixed;
+      right: 0%;
+      height: 100%;
+      background-color: white;
+      width: 25%;
+      visibility: hidden;
+      overflow: auto;
+      padding: 10px;
+    }
+    #jsonArea { width: 100%; height: 120px; margin-top: 10px; }
+    #display button { margin-top: 5px; margin-right: 5px; }
+    .pointRow {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-bottom: 5px;
+    }
+    .pointRow input { width: 45px; }
+  </style>
+</head>
+<body>
+  <div id="overlay">
+    <div class="button-container">
+      <button id="edit">edit</button>
+      <button id="startButton">start</button>
+      <div id="display">
+        <h3>Track Points</h3>
+        <div id="pointEditor"></div>
+        <button id="addPoint">Add Point</button><br><h3>other (useless at the momentium)</h3><br><input type="number" max="0.000000000000000001" min="10" value="0.0000001"><label>friction</label><br><input type="number" max="80" min="0.0000000001" value="200"><label>min vel</label><br><input type="number" max="2000" min="" value="0.0000000001"><label>max vel</label><h3>import/export</h3>
+        <button id="exportJson">Export JSON</button>
+        <button id="importJson">Import JSON</button>
+        <textarea id="jsonArea" placeholder="Paste JSON here..."></textarea>
       </div>
-      <div id="message-display">Fly around or follow the coaster!</div>
     </div>
+  </div>
 
-    <script type="module">
-      import * as THREE from 'https://cdn.skypack.dev/three@0.128.0/build/three.module.js';
-      import { VRButton } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/webxr/VRButton.js';
-      import { FlyControls } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/controls/FlyControls.js';
-      import {
-        RollerCoasterGeometry,
-        TreesGeometry,
-        SkyGeometry,
-      } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/misc/RollerCoaster.js';
+  <script type="module">
+    import * as THREE from 'https://cdn.skypack.dev/three@0.128.0/build/three.module.js';
+    import { VRButton } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/webxr/VRButton.js';
+    import { FlyControls } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/controls/FlyControls.js';
+    import {
+      RollerCoasterGeometry,
+      TreesGeometry,
+      SkyGeometry,
+    } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/misc/RollerCoaster.js';
 
-      const renderer = new THREE.WebGLRenderer({ antialias: true });
+    let coaster = {
+      "friction": 0.000000000001,
+      "max_vel": 200,
+      "min_vel": 0.00008,
+      "points": [
+        [0, 10, 0],
+        [10, 10, 0],
+        [25, 28, 0],
+        [35, 10, 0],
+        [50, 10, 0],
+        [50, 10, 10]
+      ]
+    };
+
+    let scene, renderer, camera, controls, trackMesh, curve, train;
+    let currentVelocity = 0, currentProgress = 0, coasterState = 'stopped';
+    const MIN_VELOCITY = coaster.min_vel;
+    const MAX_VELOCITY = coaster.max_vel;
+    const FRICTION = coaster.friction;
+
+    const pointEditor = document.getElementById('pointEditor');
+
+    function updatePointEditor() {
+      pointEditor.innerHTML = '';
+      coaster.points.forEach((pt, i) => {
+        const row = document.createElement('div');
+        row.className = 'pointRow';
+
+        const inputs = pt.map((val, idx) => {
+          const input = document.createElement('input');
+          input.type = 'number';
+          input.value = val;
+          input.step = '0.1';
+          input.oninput = () => {
+            coaster.points[i][idx] = parseFloat(input.value);
+            createTrack();
+          };
+          row.appendChild(input);
+          return input;
+        });
+
+        const dupBtn = document.createElement('button');
+        dupBtn.textContent = '+';
+        dupBtn.onclick = () => {
+          coaster.points.splice(i + 1, 0, [...coaster.points[i]]);
+          updatePointEditor();
+          createTrack();
+        };
+
+        const delBtn = document.createElement('button');
+        delBtn.textContent = 'x';
+        delBtn.onclick = () => {
+          if (coaster.points.length > 2) {
+            coaster.points.splice(i, 1);
+            updatePointEditor();
+            createTrack();
+          }
+        };
+
+        row.appendChild(dupBtn);
+        row.appendChild(delBtn);
+        pointEditor.appendChild(row);
+      });
+    }
+
+    document.getElementById('edit').onclick = function () {
+      const isEditing = this.textContent === 'edit';
+      this.textContent = isEditing ? 'x' : 'edit';
+      document.getElementById('display').style.visibility = isEditing ? 'visible' : 'hidden';
+      if (isEditing) updatePointEditor();
+    };
+
+    document.getElementById('addPoint').onclick = () => {
+      coaster.points.push([0, 0, 0]);
+      updatePointEditor();
+      createTrack();
+    };
+
+    const messageDisplay = document.createElement('div');
+    messageDisplay.id = 'message-display';
+    messageDisplay.style.position = 'absolute';
+    messageDisplay.style.bottom = '10px';
+    messageDisplay.style.left = '50%';
+    messageDisplay.style.transform = 'translateX(-50%)';
+    messageDisplay.style.background = 'white';
+    messageDisplay.style.padding = '4px';
+    messageDisplay.style.fontFamily = 'sans-serif';
+    document.body.appendChild(messageDisplay);
+
+    function createTrack() {
+      const trackPoints = coaster.points.map(p => new THREE.Vector3(...p));
+      curve = new THREE.CatmullRomCurve3(trackPoints, true);
+
+      if (trackMesh) scene.remove(trackMesh);
+
+      const track = new RollerCoasterGeometry({
+        getPointAt: curve.getPointAt.bind(curve),
+        getTangentAt: curve.getTangentAt.bind(curve)
+      }, 1500);
+
+      trackMesh = new THREE.Mesh(track, new THREE.MeshPhongMaterial({ color: 0x333333, flatShading: true }));
+      scene.add(trackMesh);
+    }
+
+    function init() {
+      
+      renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
       document.body.appendChild(VRButton.createButton(renderer));
 
-      const scene = new THREE.Scene();
+      scene = new THREE.Scene();
       scene.background = new THREE.Color(0x88ccff);
 
-      const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-      camera.position.set(10, 15, 50);
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(15, 35, 0);
 
-      const controls = new FlyControls(camera, renderer.domElement);
+      controls = new FlyControls(camera, renderer.domElement);
       controls.movementSpeed = 30;
       controls.rollSpeed = Math.PI / 8;
       controls.autoForward = false;
@@ -64,55 +202,25 @@
       const light = new THREE.HemisphereLight(0xfffff0, 0x444488, 1.2);
       scene.add(light);
 
-      // Train cart (visible square box)
-      const train = new THREE.Mesh(
-        new THREE.BoxGeometry(2, 2, 2),
-        new THREE.MeshStandardMaterial({ color: 0xff0000 })
-      );
-      train.castShadow = true;
-      scene.add(train);
-
-      // Coaster curve
-      const trackPoints = [
-        new THREE.Vector3(0, 10, 0), new THREE.Vector3(20, 30, 0), new THREE.Vector3(40, 50, 0),
-        new THREE.Vector3(60, 45, -20), new THREE.Vector3(80, 25, -40), new THREE.Vector3(100, 15, -20),
-        new THREE.Vector3(120, 20, 0), new THREE.Vector3(140, 25, 20), new THREE.Vector3(120, 30, 40),
-        new THREE.Vector3(100, 35, 20), new THREE.Vector3(80, 40, 0), new THREE.Vector3(60, 35, -20),
-        new THREE.Vector3(40, 20, -40), new THREE.Vector3(20, 15, -20), new THREE.Vector3(0, 10, 0),
-      ];
-      const curve = new THREE.CatmullRomCurve3(trackPoints, true);
-
-      // Visible track
-      const track = new RollerCoasterGeometry({ getPointAt: curve.getPointAt.bind(curve), getTangentAt: curve.getTangentAt.bind(curve) }, 1500);
-      const trackMesh = new THREE.Mesh(track, new THREE.MeshPhongMaterial({ color: 0x333333, flatShading: true }));
-      scene.add(trackMesh);
-
-      // Ground
       const ground = new THREE.Mesh(
         new THREE.PlaneGeometry(1000, 1000),
         new THREE.MeshLambertMaterial({ color: 0x228822 })
       );
       ground.rotation.x = -Math.PI / 2;
-      ground.position.y = 0;
       scene.add(ground);
 
-      // Trees
-      scene.add(new THREE.Mesh(
-        new TreesGeometry(ground),
-        new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })
-      ));
-
-      // Sky
+      scene.add(new THREE.Mesh(new TreesGeometry(ground), new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })));
       scene.add(new THREE.Mesh(new SkyGeometry(), new THREE.MeshBasicMaterial({ color: 0xffffff })));
 
-      // Coaster motion variables
-      let currentVelocity = 0;
-      let currentProgress = 0;
-      let coasterState = 'stopped';
+      train = new THREE.Mesh(
+        new THREE.BoxGeometry(2, 2, 2),
+        new THREE.MeshStandardMaterial({ color: 0xff0000 })
+      );
+      scene.add(train);
 
-      const startButton = document.getElementById('startButton');
-      const messageDisplay = document.getElementById('message-display');
-      startButton.addEventListener('click', () => {
+      createTrack();
+
+      document.getElementById('startButton').addEventListener('click', () => {
         if (coasterState === 'stopped') {
           coasterState = 'running';
           currentProgress = 0;
@@ -121,13 +229,32 @@
         }
       });
 
-      const MIN_VELOCITY = 0.00008;
-      const MAX_VELOCITY = 200;
-      const FRICTION = 0.000000000001;
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
 
-      let prevTime = performance.now();
+      document.getElementById('importJson').onclick = () => {
+        try {
+          const newCoaster = JSON.parse(document.getElementById('jsonArea').value);
+          coaster = newCoaster;
+          updatePointEditor();
+          createTrack();
+        } catch (e) {
+          alert("Invalid JSON");
+        }
+      };
 
-      function render() {
+      document.getElementById('exportJson').onclick = () => {
+        const output = JSON.stringify(coaster, null, 2);
+        document.getElementById('jsonArea').value = output;
+      };
+    }
+
+    let prevTime = performance.now();
+    function animate() {
+      renderer.setAnimationLoop(() => {
         const time = performance.now();
         const delta = time - prevTime;
 
@@ -140,8 +267,8 @@
           currentProgress += currentVelocity;
           if (currentProgress > 1) {
             currentProgress = 0;
-            messageDisplay.textContent = 'Train finished loop!';
             coasterState = 'stopped';
+            messageDisplay.textContent = 'Train finished loop!';
           }
 
           const position = curve.getPointAt(currentProgress);
@@ -155,16 +282,32 @@
         controls.update(delta * 0.001);
         renderer.render(scene, camera);
         prevTime = time;
-      }
-
-      window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
       });
+      // Ensure controls have keyboard input from the beginning
+      renderer.domElement.tabIndex = 0;
+      renderer.domElement.focus();
 
-      renderer.setAnimationLoop(render);
-    </script>
-  </body>
+    }
+
+    init();
+    animate();
+    let speedStep = 2; // How much to change the speed per scroll
+    let minSpeed = 1;
+    let maxSpeed = 100;
+      
+    window.addEventListener('wheel', (event) => {
+      // Scroll up increases speed, scroll down decreases
+      if (event.deltaY < 0) {
+        controls.movementSpeed = Math.min(maxSpeed, controls.movementSpeed + speedStep);
+      } else {
+        controls.movementSpeed = Math.max(minSpeed, controls.movementSpeed - speedStep);
+      }
+      
+      messageDisplay.textContent = `Fly Speed: ${controls.movementSpeed.toFixed(1)}`;
+    });
+    
+  </script>
+</body>
 </html>
+
 
