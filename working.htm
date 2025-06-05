@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Babylon.js Roller Coaster</title>
+  <style>
+    html, body {
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+      font-family: 'Inter', sans-serif;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 10;
+      pointer-events: none;
+    }
+    .button-style {
+      pointer-events: auto;
+      font-size: clamp(14px, 2.5vw, 20px);
+      padding: 10px 20px;
+      background: linear-gradient(145deg, #5cb85c, #4cae4c);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      transition: transform 0.1s ease, background-color 0.2s ease;
+      text-align: center;
+    }
+    .button-style:hover {
+      background: linear-gradient(145deg, #4cae4c, #449d44);
+      transform: translateY(-2px);
+    }
+    .button-style:active {
+      transform: translateY(1px);
+    }
+    #startButton {
+      /* Positioned by overlay flex */
+    }
+    #switchViewButton {
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      z-index: 20; /* Ensure it's above canvas, below potential modals */
+      background: linear-gradient(145deg, #337ab7, #286090);
+    }
+    #switchViewButton:hover {
+      background: linear-gradient(145deg, #286090, #204d74);
+    }
+  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="overlay">
+    <button id="startButton" class="button-style">Start Ride</button>
+  </div>
+  <button id="switchViewButton" class="button-style">View from Cart</button>
+  <canvas id="renderCanvas"></canvas>
+
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script>
+    const canvas = document.getElementById("renderCanvas");
+    const engine = new BABYLON.Engine(canvas, true);
+    const scene = new BABYLON.Scene(engine);
+
+    scene.clearColor = new BABYLON.Color3(0.8, 0.9, 1);
+
+    // --- Cameras ---
+    const spectatorCamera = new BABYLON.ArcRotateCamera("spectatorCamera", Math.PI / 2, Math.PI / 3, 70, new BABYLON.Vector3(25, 15, 25), scene);
+    spectatorCamera.attachControl(canvas, true);
+    spectatorCamera.lowerRadiusLimit = 10; 
+    spectatorCamera.upperRadiusLimit = 200; 
+    
+    const cartCamera = new BABYLON.UniversalCamera("cartCamera", new BABYLON.Vector3(0, 0.3, 0.7), scene); 
+    // cartCamera control is attached when switched to.
+
+    scene.activeCamera = spectatorCamera; 
+
+    const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+    light.intensity = 0.8;
+    const light2 = new BABYLON.DirectionalLight("dirLight", new BABYLON.Vector3(-0.5, -1, -0.5), scene);
+    light2.position = new BABYLON.Vector3(20, 40, 20);
+    light2.intensity = 0.5;
+
+    // --- Roller Coaster Parameters ---
+    const GRAVITY = 9.81;
+    const DAMPING_COEFFICIENT = 0.01;
+    const INITIAL_PUSH_VELOCITY = 8.0;  // Increased initial push
+    const MIN_OPERATIONAL_VELOCITY = 5.0;  // Minimum speed (increased from 2.0)
+    const MAX_VELOCITY = 35.0;
+    const CART_HEIGHT_OFFSET = 0.4;
+    const railOffsetValue = 0.4;  // Increased rail spacing
+    const railRadiusValue = 0.06;
+
+    // Track type definitions
+    const TRACK_TYPES = {
+        NORMAL: 0,
+        CHAIN_LIFT: 1,
+        BOOST: 2,
+        BRAKE: 3
+    };
+
+    const TRACK_PROPERTIES = {
+        [TRACK_TYPES.NORMAL]: { color: new BABYLON.Color3(0.35, 0.25, 0.15), speed: null },
+        [TRACK_TYPES.CHAIN_LIFT]: { 
+            color: new BABYLON.Color3(0.7, 0.7, 0.2), 
+            speed: 12.0, // Increased chain lift speed
+            force: true 
+        },
+        [TRACK_TYPES.BOOST]: { color: new BABYLON.Color3(0.2, 0.7, 0.2), speed: 35.0, acceleration: 20.0 },
+        [TRACK_TYPES.BRAKE]: { color: new BABYLON.Color3(0.7, 0.2, 0.2), speed: 5.0, deceleration: 15.0 }
+    };
+
+    // Track points: [x, y, z, rollAngleInRadians, trackType]
+    const coasterTrackPointsDefinition = [
+        // [x, y, z, rollAngleInRadians, trackType]
+        [0, 10, 0, 0, TRACK_TYPES.CHAIN_LIFT],               // Start level
+        [40, 10, 12, 0, TRACK_TYPES.NORMAL],        // Bank left into turn
+        [60, 50, 15, 0, TRACK_TYPES.NORMAL],        // Keep bank through climb
+        [70, 49, 15, 0, TRACK_TYPES.NORMAL],                 // Level out at top
+        [80, 48, 15, -Math.PI/4, TRACK_TYPES.BOOST],          // Bank right into boost
+        [90, 30, 15, -Math.PI/4, TRACK_TYPES.BOOST],          // Maintain bank in boost
+        [100, 20, 10, 0, TRACK_TYPES.NORMAL],                // Level out
+        [110, 15, 0, -Math.PI/4, TRACK_TYPES.NORMAL],        // Bank left into turn
+        [100, 12, -15, -Math.PI/4, TRACK_TYPES.BRAKE],       // Maintain bank through brake
+        [90, 10, -20, 0, TRACK_TYPES.NORMAL],                // Level out
+        [70, 10, -10, 0, TRACK_TYPES.NORMAL],                // Stay level
+        [50, 10, 0, 0, TRACK_TYPES.NORMAL],                  // Stay level
+        [30, 10, 0, 0, TRACK_TYPES.NORMAL],                  // Back to start
+        [20, 10, 0, 0, TRACK_TYPES.NORMAL]                   // Final approach
+    ];
+
+    const controlPointsData = coasterTrackPointsDefinition.map(p => ({
+        point: new BABYLON.Vector4(p[0], p[1], p[2], p[3] || 0),
+        trackType: p[4] !== undefined ? p[4] : TRACK_TYPES.NORMAL
+    }));
+    const pathControlPoints = controlPointsData.map(data => new BABYLON.Vector3(data.point.x, data.point.y, data.point.z));
+
+    const isTrackLoop = true;
+    const numCurveDetailPoints = 120; // Number of points to generate for the curve path
+    const curve = BABYLON.Curve3.CreateCatmullRomSpline(pathControlPoints, numCurveDetailPoints, isTrackLoop); 
+    const curvePoints = curve.getPoints(); // These are the detailed points forming the smooth path
+
+    const path3D = new BABYLON.Path3D(curvePoints);
+    const pathLength = path3D.length();
+
+    // --- Helper Functions ---
+    function getInterpolatedRollAngle(progress, cpData, isLoop) {
+        const numOriginalCPs = cpData.length;
+        if (numOriginalCPs === 0) return 0;
+        if (numOriginalCPs === 1) return cpData[0].point.w;
+
+        let pNorm = progress;
+        if (pNorm >= 1.0 && isLoop) { 
+            pNorm %= 1.0; 
+        } else if (pNorm > 1.0 && !isLoop) { 
+            pNorm = 1.0; 
+        }
+
+        const P1_idx_float = pNorm * (isLoop ? numOriginalCPs : (numOriginalCPs - 1));
+        let P1_idx = Math.floor(P1_idx_float);
+        let t_segment = P1_idx_float - P1_idx;
+
+        let P2_idx;
+        if (isLoop) {
+            P1_idx = P1_idx % numOriginalCPs;
+            P2_idx = (P1_idx + 1) % numOriginalCPs;
+        } else {
+            P1_idx = Math.min(P1_idx, numOriginalCPs - 2);
+            P2_idx = P1_idx + 1;
+            if (pNorm >= 1.0) {
+                return cpData[numOriginalCPs - 1].point.w;
+            }
+        }
+
+        const roll1 = cpData[P1_idx].point.w;
+        const roll2 = cpData[P2_idx].point.w;
+
+        // If either point is meant to be level (0), interpolate more sharply
+        if (roll1 === 0 || roll2 === 0) {
+            // Use cubic interpolation when transitioning to/from level
+            const t = t_segment;
+            const t2 = t * t;
+            const t3 = t2 * t;
+            if (roll1 === 0) {
+                // Starting from level
+                return roll2 * (t3); // Slower start, faster end
+            } else {
+                // Ending at level
+                return roll1 * (1 - t3); // Faster start, slower end
+            }
+        }
+
+        // Normal linear interpolation for transitions between banked sections
+        return BABYLON.Scalar.Lerp(roll1, roll2, t_segment);
+    }
+
+    function getTrackTypeAtProgress(progress, cpData, isLoop) {
+        const numOriginalCPs = cpData.length;
+        if (numOriginalCPs === 0) return TRACK_TYPES.NORMAL;
+        
+        let pNorm = progress;
+        if (pNorm >= 1.0 && isLoop) { pNorm %= 1.0; }
+        else if (pNorm >= 1.0 && !isLoop) { pNorm = 1.0 - 1e-6; } 
+
+        const P1_idx_float = pNorm * (isLoop ? numOriginalCPs : (numOriginalCPs - 1));
+        const P1_idx = Math.min(Math.floor(P1_idx_float), numOriginalCPs - 1); 
+        
+        return cpData[Math.max(0, P1_idx)].trackType; 
+    }
+
+
+    // --- Track Visualization ---
+    const trackMaterials = {};
+    Object.entries(TRACK_PROPERTIES).forEach(([type, props]) => {
+        trackMaterials[type] = new BABYLON.StandardMaterial(`trackMat${type}`, scene);
+        trackMaterials[type].diffuseColor = props.color;
+        trackMaterials[type].specularColor = new BABYLON.Color3(0.1, 0.1, 0.05);
+    });
+
+    const tiesMaterial = new BABYLON.StandardMaterial("tiesMaterial", scene);
+    tiesMaterial.diffuseColor = new BABYLON.Color3(0.4, 0.3, 0.2);
+    tiesMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+
+    const supportMaterial = new BABYLON.StandardMaterial("supportMaterial", scene);
+    supportMaterial.diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.6);
+    supportMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+
+    // Clear existing arrays
+    const railPathLeft = [];
+    const railPathRight = [];
+
+    // Generate rail paths with proper banking
+    for (let i = 0; i < curvePoints.length; i++) {
+        const progress = i / (curvePoints.length - 1);
+        const point = curvePoints[i];
+        const tangent = path3D.getTangentAt(progress).normalize();
+        
+        // Get base up vector that avoids gimbal lock
+        let upVector = BABYLON.Vector3.UpReadOnly;
+        if (Math.abs(BABYLON.Vector3.Dot(tangent, upVector)) > 0.95) {
+            upVector = BABYLON.Vector3.ForwardReadOnly;
+        }
+        
+        // Calculate initial right vector (perpendicular to tangent and up)
+        const rightVector = BABYLON.Vector3.Cross(tangent, upVector).normalize();
+        
+        // Get the roll angle for this point
+        const roll = getInterpolatedRollAngle(progress, controlPointsData, isTrackLoop);
+        
+        // Create rotation matrix for banking
+        const rotationMatrix = BABYLON.Matrix.RotationAxis(tangent, roll);
+        
+        // Apply banking rotation to right vector
+        const bankedRight = BABYLON.Vector3.TransformNormal(rightVector, rotationMatrix);
+        
+        // Calculate rail positions using the banked right vector
+        const leftPoint = point.subtract(bankedRight.scale(railOffsetValue));
+        const rightPoint = point.add(bankedRight.scale(railOffsetValue));
+        
+        railPathLeft.push(leftPoint);
+        railPathRight.push(rightPoint);
+    }
+
+    // Create track segments with proper materials
+    for (let i = 0; i < curvePoints.length - 1; i++) {
+        const segmentProgress = i / (curvePoints.length - 1);
+        const trackType = getTrackTypeAtProgress(segmentProgress, controlPointsData, isTrackLoop);
+        
+        // Left rail
+        BABYLON.MeshBuilder.CreateTube(
+            `railLeft${i}`,
+            {
+                path: [railPathLeft[i], railPathLeft[i+1]],
+                radius: railRadiusValue,
+                tessellation: 12,
+                cap: BABYLON.Mesh.NO_CAP
+            },
+            scene
+        ).material = trackMaterials[trackType];
+        
+        // Right rail
+        BABYLON.MeshBuilder.CreateTube(
+            `railRight${i}`,
+            {
+                path: [railPathRight[i], railPathRight[i+1]],
+                radius: railRadiusValue,
+                tessellation: 12,
+                cap: BABYLON.Mesh.NO_CAP
+            },
+            scene
+        ).material = trackMaterials[trackType];
+    }
+    
+    const numTies = Math.floor(pathLength / 1.0); 
+    const tieOrientationMatrix = new BABYLON.Matrix();
+    const tieBaseOrientationMatrix = new BABYLON.Matrix();
+    const tieRollMatrix = new BABYLON.Matrix();
+    const tieRollQuaternion = new BABYLON.Quaternion(); // Reusable quaternion for tie roll
+
+    for (let i = 0; i < numTies; i++) {
+        const tieProgress = i / (numTies > 1 ? numTies - 1 : 1);
+        const point = path3D.getPointAt(tieProgress);
+        const tangent = path3D.getTangentAt(tieProgress).normalize();
+        const interpolatedRoll = getInterpolatedRollAngle(tieProgress, controlPointsData, isTrackLoop);
+
+        let upReference = BABYLON.Vector3.UpReadOnly;
+        if (Math.abs(BABYLON.Vector3.Dot(tangent, upReference)) > 0.98) {
+            upReference = BABYLON.Vector3.RightReadOnly;
+        }
+        const baseBinormal = BABYLON.Vector3.Cross(tangent, upReference).normalize();
+        const baseNormal = BABYLON.Vector3.Cross(baseBinormal, tangent).normalize();
+        
+        BABYLON.Matrix.FromXYZAxesToRef(baseBinormal, baseNormal, tangent, tieBaseOrientationMatrix);
+        BABYLON.Matrix.RotationAxisToRef(tangent, interpolatedRoll, tieRollMatrix);
+        tieRollMatrix.multiplyToRef(tieBaseOrientationMatrix, tieOrientationMatrix);
+
+        // Correctly calculate normalForOffset for positioning the tie
+        const normalForOffset = baseNormal.clone(); // Start with the stable base normal
+        BABYLON.Quaternion.RotationAxisToRef(tangent, interpolatedRoll, tieRollQuaternion); // Create roll quaternion
+        normalForOffset.rotateByQuaternionToRef(tieRollQuaternion, normalForOffset); // Rotate the cloned normal
+
+        const tie = BABYLON.MeshBuilder.CreateBox("tie" + i, {width: railOffsetValue * 2.2, height: 0.1, depth: 0.15}, scene);
+        tie.position = point.subtract(normalForOffset.scale(railRadiusValue + 0.05)); 
+        tie.material = tiesMaterial;
+        if (!tie.rotationQuaternion) tie.rotationQuaternion = new BABYLON.Quaternion();
+        BABYLON.Quaternion.FromRotationMatrixToRef(tieOrientationMatrix, tie.rotationQuaternion);
+
+        if (point.y > railRadiusValue * 2 + 0.5) { 
+            const supportPost = BABYLON.MeshBuilder.CreateCylinder("support" + i, {height: point.y - railRadiusValue, diameterTop: 0.25, diameterBottom: 0.35, tessellation: 8}, scene);
+            supportPost.position = new BABYLON.Vector3(point.x, (point.y - railRadiusValue) / 2, point.z); 
+            supportPost.material = supportMaterial;
+        }
+    }
+
+    // --- Cart ---
+    const cart = BABYLON.MeshBuilder.CreateBox("cart", { width: 0.7, height: 0.6, depth: 2.2 }, scene);
+    cart.rotationQuaternion = new BABYLON.Quaternion();
+    const cartMaterial = new BABYLON.StandardMaterial("cartMat", scene);
+    cartMaterial.diffuseColor = new BABYLON.Color3(0.9, 0.15, 0.15);
+    cartMaterial.specularColor = new BABYLON.Color3(0.4, 0.4, 0.4);
+    cart.material = cartMaterial;
+
+    cartCamera.parent = cart;
+    if (!cartCamera.rotationQuaternion) cartCamera.rotationQuaternion = BABYLON.Quaternion.Identity();
+    else cartCamera.rotationQuaternion.copyFrom(BABYLON.Quaternion.Identity());
+
+    const cartBaseOrientationMatrix = new BABYLON.Matrix(); 
+    const cartRollMatrix = new BABYLON.Matrix();         
+    const cartFinalOrientationMatrix = new BABYLON.Matrix(); 
+
+    // --- Movement Logic ---
+    let currentVelocity = 0;
+    let currentProgress = 0;
+    let coasterState = "stopped";
+    let prevTime = performance.now();
+
+    function initializeCartState() {
+        currentProgress = 0;
+        currentVelocity = 0;
+        coasterState = "stopped";
+        const initialTangent = path3D.getTangentAt(0).normalize();
+        const initialNormalFromPath = path3D.getNormalAt(0).normalize(); 
+        cart.position.copyFrom(pathControlPoints[0].add(initialNormalFromPath.scale(CART_HEIGHT_OFFSET)));
+        
+        const initialRoll = getInterpolatedRollAngle(0, controlPointsData, isTrackLoop);
+        
+        let upReference = BABYLON.Vector3.UpReadOnly;
+        if (Math.abs(BABYLON.Vector3.Dot(initialTangent, upReference)) > 0.98) {
+            upReference = BABYLON.Vector3.RightReadOnly;
+        }
+        const baseBinormal = BABYLON.Vector3.Cross(initialTangent, upReference).normalize();
+        const baseNormal = BABYLON.Vector3.Cross(baseBinormal, initialTangent).normalize();
+        BABYLON.Matrix.FromXYZAxesToRef(baseBinormal, baseNormal, initialTangent, cartBaseOrientationMatrix);
+        BABYLON.Matrix.RotationAxisToRef(initialTangent, initialRoll, cartRollMatrix);
+        cartRollMatrix.multiplyToRef(cartBaseOrientationMatrix, cartFinalOrientationMatrix);
+        BABYLON.Quaternion.FromRotationMatrixToRef(cartFinalOrientationMatrix, cart.rotationQuaternion);
+    }
+    
+    initializeCartState();
+
+    const updateTrainPosition = (delta) => {
+        if (pathLength <= 0) return;
+        const deltaTimeSeconds = delta / 1000.0;
+        const normalizedProgress = Math.max(0, Math.min(currentProgress, 0.999999));
+        
+        const currentTrackType = getTrackTypeAtProgress(normalizedProgress, controlPointsData, isTrackLoop);
+        const trackProps = TRACK_PROPERTIES[currentTrackType];
+        const tangent = path3D.getTangentAt(normalizedProgress).normalize();
+        const slopeFactor = -tangent.y;
+        
+        if (trackProps) {
+            switch (currentTrackType) {
+                case TRACK_TYPES.CHAIN_LIFT:
+                    if (trackProps.force) currentVelocity = trackProps.speed;
+                    else { 
+                        const accelerationDueToGravity = GRAVITY * slopeFactor;
+                        currentVelocity += accelerationDueToGravity * deltaTimeSeconds;
+                        currentVelocity *= (1 - DAMPING_COEFFICIENT * deltaTimeSeconds);
+                        if (currentVelocity < trackProps.speed && slopeFactor <=0) { 
+                           currentVelocity = Math.min(currentVelocity + trackProps.speed * 0.2 * deltaTimeSeconds, trackProps.speed); 
+                        }
+                    }
+                    break;
+                case TRACK_TYPES.BOOST:
+                    currentVelocity += trackProps.acceleration * deltaTimeSeconds;
+                    currentVelocity = Math.min(currentVelocity, trackProps.speed);
+                    break;
+                case TRACK_TYPES.BRAKE:
+                    if (currentVelocity > trackProps.speed) {
+                        currentVelocity -= trackProps.deceleration * deltaTimeSeconds;
+                        currentVelocity = Math.max(currentVelocity, trackProps.speed);
+                    } else { 
+                         currentVelocity = Math.max(currentVelocity - trackProps.deceleration*0.1 * deltaTimeSeconds, trackProps.speed);
+                    }
+                    break;
+                default: 
+                    const accelerationDueToGravity = GRAVITY * slopeFactor;  // Fixed variable name
+                    currentVelocity += accelerationDueToGravity * deltaTimeSeconds;
+                    currentVelocity *= (1 - DAMPING_COEFFICIENT * deltaTimeSeconds);
+            }
+        }
+        
+        if (currentTrackType !== TRACK_TYPES.CHAIN_LIFT || !TRACK_PROPERTIES[TRACK_TYPES.CHAIN_LIFT].force) {
+            if (currentTrackType !== TRACK_TYPES.BRAKE) { 
+                 if (currentVelocity > 0 && currentVelocity < MIN_OPERATIONAL_VELOCITY && slopeFactor < 0.05) { 
+                    currentVelocity = MIN_OPERATIONAL_VELOCITY;
+                }
+            }
+        }
+        
+        // Always enforce minimum speed except during initialization
+        if (coasterState === "running") {
+            currentVelocity = Math.max(MIN_OPERATIONAL_VELOCITY, currentVelocity);
+            currentVelocity = Math.min(MAX_VELOCITY, currentVelocity);
+        }
+        
+        currentProgress += (currentVelocity * deltaTimeSeconds) / pathLength;
+        
+        if (currentProgress >= 1) {
+            if (isTrackLoop) { currentProgress %= 1.0; } 
+            else { initializeCartState(); document.getElementById("startButton").style.display = "block"; return; }
+        }
+        
+        const positionOnCurve = path3D.getPointAt(currentProgress);
+        const normalFromPathForHeight = path3D.getNormalAt(currentProgress).normalize(); 
+        cart.position.copyFrom(positionOnCurve.add(normalFromPathForHeight.scale(CART_HEIGHT_OFFSET))); 
+        
+        let upReference = BABYLON.Vector3.UpReadOnly;
+        if (Math.abs(BABYLON.Vector3.Dot(tangent, upReference)) > 0.98) {
+            upReference = BABYLON.Vector3.RightReadOnly;
+        }
+        const baseBinormal = BABYLON.Vector3.Cross(tangent, upReference).normalize();
+        const baseNormal = BABYLON.Vector3.Cross(baseBinormal, tangent).normalize();
+        BABYLON.Matrix.FromXYZAxesToRef(baseBinormal, baseNormal, tangent, cartBaseOrientationMatrix);
+        
+        const interpolatedRoll = getInterpolatedRollAngle(currentProgress, controlPointsData, isTrackLoop);
+        
+        BABYLON.Matrix.RotationAxisToRef(tangent, interpolatedRoll, cartRollMatrix);
+        cartRollMatrix.multiplyToRef(cartBaseOrientationMatrix, cartFinalOrientationMatrix);
+        BABYLON.Quaternion.FromRotationMatrixToRef(cartFinalOrientationMatrix, cart.rotationQuaternion);
+    };
+
+    engine.runRenderLoop(() => {
+      const time = performance.now();
+      const delta = time - prevTime;
+      if (coasterState === "running") {
+        updateTrainPosition(delta);
+      }
+      scene.render();
+      prevTime = time;
+    });
+
+    window.addEventListener("resize", () => { engine.resize(); });
+
+    document.getElementById("startButton").addEventListener("click", () => {
+      if (coasterState === "stopped") {
+        initializeCartState(); 
+        currentVelocity = INITIAL_PUSH_VELOCITY; 
+        if (currentVelocity > 0 && currentVelocity < MIN_OPERATIONAL_VELOCITY) {
+            currentVelocity = MIN_OPERATIONAL_VELOCITY;
+        }
+        coasterState = "running";
+        document.getElementById("startButton").style.display = "none";
+        prevTime = performance.now(); 
+      }
+    });
+
+    const switchViewButton = document.getElementById("switchViewButton");
+    let isCartView = false;
+    switchViewButton.addEventListener("click", () => {
+        isCartView = !isCartView;
+        if (isCartView) {
+            spectatorCamera.detachControl(canvas);
+            scene.activeCamera = cartCamera;
+            cartCamera.rotation.x = 0; 
+            cartCamera.rotation.y = 0; 
+            cartCamera.attachControl(canvas, true); 
+            switchViewButton.textContent = "Spectator View";
+        } else {
+            if (scene.activeCamera === cartCamera) {
+                 cartCamera.detachControl(canvas);
+            }
+            scene.activeCamera = spectatorCamera;
+            spectatorCamera.attachControl(canvas, true);
+            switchViewButton.textContent = "View from Cart";
+        }
+    });
+
+    const ground = BABYLON.MeshBuilder.CreateGround("ground", {width: 250, height: 250}, scene); 
+    const groundMaterial = new BABYLON.StandardMaterial("groundMat", scene);
+    groundMaterial.diffuseTexture = new BABYLON.Texture("https://www.babylonjs-playground.com/textures/grass.png", scene); 
+    groundMaterial.diffuseTexture.uScale = 10;
+    groundMaterial.diffuseTexture.vScale = 10;
+    groundMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+    ground.material = groundMaterial;
+    ground.position.y = -0.5; 
+  </script>
+</body>
+</html>
