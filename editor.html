@@ -257,9 +257,11 @@
           const position = curve.getPointAt(currentProgress);
           train.position.copy(position);
 
-          const direction = curve.getTangentAt(currentProgress);
+          const direction = curve.getTangentAt(currentProgress).normalize();
           const lookAt = new THREE.Vector3().copy(position).add(direction);
+          train.up.set(0, 1, 0); // Force global up direction
           train.lookAt(lookAt);
+
         }
 
         controls.update(delta * 0.001);
