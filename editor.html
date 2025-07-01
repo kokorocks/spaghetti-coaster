@@ -147,7 +147,7 @@
     document.body.appendChild(messageDisplay);
 
     function createTrack() {
-      const trackPoints = coaster.points.map(p => new THREE.Vector3(...p));
+      const trackPoints = coaster.points.map(p => new THREE.Vector3(p[0], p[1], 0));
       curve = new THREE.CatmullRomCurve3(trackPoints, true);
 
       if (trackMesh) scene.remove(trackMesh);
